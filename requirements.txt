@@ -1,0 +1,5 @@
+cryptography
+prompt_toolkit
+colored
+pystyle
+art
