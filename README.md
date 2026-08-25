@@ -156,7 +156,7 @@ Contains terminal UI, colors, and banner functions.
 Clone the repository:
 
 ```bash
-git clone https://github.com/Notron00/Undercover-.git
+git clone https://github.com/Notron00/Undercover.git
 cd Undercover-
 ```
 
