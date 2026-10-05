@@ -1,5 +1,5 @@
-cryptography
-prompt_toolkit
-colored
-pystyle
-art
+cryptography==50.0.2
+prompt_toolkit==3.0.53
+colored==2.3.2
+pystyle==2.9
+art==6.5
