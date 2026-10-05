@@ -1,16 +1,10 @@
 import socket
 import threading
 import sys
+
 from modules import makeup
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
-
-session = PromptSession() # this "promptSession" will debug the text so it will not be broken on ur terminal
-
-makeup.wipe()
-
-makeup.dancinnn()
-
 
 from modules.crypto import (
     load_public_key,
@@ -25,84 +19,49 @@ from modules.protocol import (
     recv_packet
 )
 
+session = PromptSession()  # keeps terminal input from breaking during async output
+
+makeup.wipe()
+makeup.dancinnn()
+
 try:
     SERVER_IP = sys.argv[1]
-except:
-    print(makeup.TextColor["red"],"[!] IP can't be NONE")
+except IndexError:
+    print(makeup.TextColor["red"], "[!] IP can't be empty")
     exit()
+
 try:
-    SERVER_PORT = int(sys.argv[2]) # Port has to be an integer typeof data
-except:
-    print(makeup.TextColor["red"],"[!] PORT can't be NONE")
+    SERVER_PORT = int(sys.argv[2])
+except (IndexError, ValueError):
+    print(makeup.TextColor["red"], "[!] PORT must be a valid number")
     exit()
-
-if SERVER_IP is None or SERVER_PORT is None:
-    print("[!!] Cmon man give me an solid ip/port to connect lol xD")
-    exit()
-
 
 
 aes_key = None
-sock = socket.socket(
-    socket.AF_INET,
-    socket.SOCK_STREAM
-)
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.connect((SERVER_IP, SERVER_PORT))
 
 
-sock.connect(
-    (SERVER_IP, SERVER_PORT)
-)
-
-
-# RSA PUBLIC KEY BUILD
-
+# Receive the server's RSA public key
 server_public_bytes = recv_packet(sock)
-
-server_public_key = load_public_key(
-    server_public_bytes
-)
+server_public_key = load_public_key(server_public_bytes)
 
 
-# AES KEY BUILD
-
+# Generate an AES session key and send it, encrypted with the server's RSA key
 aes_key = generate_aes_key()
+encrypted_aes = rsa_encrypt(server_public_key, aes_key)
+send_packet(sock, encrypted_aes)
 
 
-# ecrypt the AES key w RSA
-encrypted_aes = rsa_encrypt(
-    server_public_key,
-    aes_key
-)
-
-
-send_packet(
-    sock,
-    encrypted_aes
-)
-
-
-
-while 1:
+# Username registration loop
+while True:
     username = input("[?] Username: ")
-    # send the encrypted username data
 
-    encrypted_username = aes_encrypt(
-        aes_key,
-        username
-    )
-
-
-    send_packet(
-        sock,
-        encrypted_username
-    )
-
+    encrypted_username = aes_encrypt(aes_key, username)
+    send_packet(sock, encrypted_username)
 
     response = recv_packet(sock)
-    response = aes_decrypt(
-        aes_key,
-        response
-    )
+    response = aes_decrypt(aes_key, response)
 
     if response == "USERNAME_TAKEN":
         print("[!] Username already taken")
@@ -111,75 +70,48 @@ while 1:
         break
 
 
-
-
 print("[+] Connected securely.")
-print("[+] AES supported w RSA encrypted chat started.")
-
+print("[+] AES-encrypted chat started (AES session key exchanged via RSA).")
 
 
 def receive():
-
     while True:
-
         try:
-
             data = recv_packet(sock)
-
-
-            message = aes_decrypt(
-                aes_key,
-                data
-            )
-
+            message = aes_decrypt(aes_key, data)
             with patch_stdout():
                 print(message)
-
-        except Exception as e:
-            session.prompt(makeup.TextColor["red"],"[!] Server side proble Occured o_O")
+        except Exception:
+            print(makeup.TextColor["red"], "[!] Server-side problem occurred")
             sock.close()
             break
-
 
 
 def send():
-
     while True:
-
         try:
-
             message = session.prompt(f"{username}~$ ")
 
-
-            if "/quit" in message or  "/exit" in message:
+            if "/quit" in message or "/exit" in message:
                 sock.close()
-                print(makeup.TextColor["cyan"],"[**] Disconnected from the IRC chat x_x")
+                print(makeup.TextColor["cyan"], "[**] Disconnected from the chat")
                 break
 
+            encrypted = aes_encrypt(aes_key, message)
+            send_packet(sock, encrypted)
 
-            encrypted = aes_encrypt(
-                aes_key,
-                message
-            )
-
-
-            send_packet(
-                sock,
-                encrypted
-            )
-
-
-        except Exception as e:
-            print(makeup. TextColor["red"],"[!] An Error Occured while sending message.")
+        except Exception:
+            print(makeup.TextColor["red"], "[!] An error occurred while sending message.")
             sock.close()
             break
 
 
-
-threading.Thread(
-    target=receive,
-    daemon=True
-).start()
-
-
-send()
+threading.Thread(target=receive, daemon=True).start()
+try:
+    send()
+except KeyboardInterrupt:
+    print(makeup.TextColor["cyan"], "\n[**] Disconnected from the chat")
+    try:
+        sock.close()
+    except Exception:
+        pass

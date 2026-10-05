@@ -1,14 +1,11 @@
 from colored import Fore, Back , Style
 from pystyle import Colorate, Colors
 from art import text2art
-import subprocess
+import os
 
 
 def wipe(): # for clean outputs (2 methods lol :>)
-    try:
-        subprocess.run["clear"]
-    except:
-        subprocess.run["cls"]
+    os.system("cls" if os.name == "nt" else "clear")
 
 TextColor = {
     "cyan" : Fore.light_cyan,
