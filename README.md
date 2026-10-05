@@ -4,7 +4,7 @@
 
 Undercover is a client-server TCP chat application developed to explore network programming, socket communication, cryptography, and secure communication protocols.
 
-The project uses RSA to securely exchange an AES session key between the client and server. After the key exchange, chat communication is encrypted using AES.
+The project uses RSA to securely exchange an AES session key between the client and server. After the key exchange, chat communication is encrypted using AES-256-GCM.
 
 ## Features
 
@@ -13,12 +13,20 @@ The project uses RSA to securely exchange an AES session key between the client 
 - Thread-based client handling
 - RSA public/private key pair
 - RSA-encrypted AES session key exchange
-- AES-encrypted chat messages
+- AES-256-GCM encrypted chat messages
 - Custom packet protocol
 - Username management
 - Duplicate username protection
 - Linux development environment
 - Modular project structure
+
+## Security Features
+
+- **Hybrid encryption**: RSA-2048 (OAEP) for session key exchange, AES-256-GCM for messages
+- **Authenticated encryption**: AES-GCM provides both confidentiality and integrity
+- **MITM protection**: TOFU-based server key pinning (SSH-style). The client verifies the server's public key fingerprint on first connection and warns if a known server's key ever changes. A fingerprint can also be pinned explicitly via argument.
+- **DoS hardening**: packet size limits reject oversized messages before allocating memory
+- **Thread-safe broadcasting**: the client list is copied under a lock, then released before network sends, so one slow client cannot block the server
 
 ## Architecture
 
@@ -43,59 +51,19 @@ Undercover uses a hybrid encryption approach.
 
 ### 1. RSA
 
-The server generates an RSA key pair:
+The server generates an RSA-2048 key pair and persists it to disk (`server_key.pem`) so its fingerprint stays stable across restarts.
 
-```text
-Private Key
-Public Key
-```
+The server sends its public key to the client. The client verifies the key's SHA-256 fingerprint (see MITM protection) before trusting it.
 
-The server sends its public key to the client.
-
-The client generates a random AES session key and encrypts it using the server's RSA public key.
-
-```text
-AES Session Key
-      │
-      ▼
-RSA Public Key
-      │
-      ▼
-Encrypted AES Key
-      │
-      ▼
-     Server
-```
+The client generates a random AES session key and encrypts it using the server's RSA public key (OAEP padding).
 
 The server decrypts the AES key using its RSA private key.
 
-### 2. AES
+### 2. AES-256-GCM
 
 After the key exchange, the client and server use the AES session key for chat communication.
 
-This avoids using RSA to encrypt every individual message.
-
-```text
-Client Message
-      │
-      ▼
- AES Encryption
-      │
-      ▼
-Encrypted Packet
-      │
-      ▼
-     TCP
-      │
-      ▼
-   Server
-      │
-      ▼
- AES Decryption
-      │
-      ▼
-Original Message
-```
+AES-256-GCM is used, providing both confidentiality and integrity (authenticated encryption). A fresh 12-byte nonce is generated for every message. This avoids using RSA to encrypt every individual message.
 
 ## Project Structure
 
@@ -117,35 +85,19 @@ Undercover/
 
 ### `client.py`
 
-Handles:
-
-- Server connection
-- RSA public key reception
-- AES session key generation
-- AES key encryption
-- Username registration
-- Message encryption/decryption
-- User input
+Handles server connection, RSA public key reception and fingerprint verification, AES session key generation and encryption, username registration, message encryption/decryption, and user input.
 
 ### `server.py`
 
-Handles:
-
-- TCP server
-- Client connections
-- RSA key generation
-- AES session key decryption
-- Username management
-- Message broadcasting
-- Client threads
+Handles the TCP server, client connections, RSA key generation/persistence, AES session key decryption, username management, message broadcasting, and client threads.
 
 ### `modules/crypto.py`
 
-Contains cryptographic functions used by the client and server.
+Contains cryptographic functions: RSA/AES operations, key persistence, and public key fingerprinting.
 
 ### `modules/protocol.py`
 
-Contains the custom packet sending and receiving functions.
+Contains the custom packet protocol (length-prefixed framing) with size limits to prevent memory-exhaustion DoS.
 
 ### `modules/makeup.py`
 
@@ -157,12 +109,14 @@ Clone the repository:
 
 ```bash
 git clone https://github.com/Notron00/Undercover.git
-cd Undercover-
+cd Undercover
 ```
 
-Install the required dependencies:
+Create a virtual environment and install dependencies:
 
 ```bash
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -174,9 +128,11 @@ Start the server with a port:
 python server.py 5555
 ```
 
-Example:
+On first run the server generates and saves an RSA key pair, then prints its public key fingerprint:
 
 ```text
+[SERVER] Public key fingerprint:
+  <64-character hex fingerprint>
 [SERVER] Listening 0.0.0.0:5555
 ```
 
@@ -188,23 +144,28 @@ Connect using:
 python client.py 127.0.0.1 5555
 ```
 
+On first connection the client shows the server's fingerprint and asks you to trust it (trust-on-first-use). It remembers trusted servers in `~/.undercover_known_hosts` and warns if a server's key later changes.
+
+To pin a known fingerprint explicitly (strict mode), pass it as a third argument:
+
+```bash
+python client.py 127.0.0.1 5555 <fingerprint>
+```
+
 Replace `127.0.0.1` with the server's IP address when connecting from another machine.
 
 ## Security Considerations
 
 This project is primarily an educational implementation for learning network security and cryptography.
 
-It should not currently be considered a production-ready secure messaging application.
+While it includes MITM protection, DoS hardening, and authenticated encryption, it should not be considered a fully production-ready secure messaging application without further review.
 
-Areas that can be improved include:
+Areas that can still be improved include:
 
-- Authenticated encryption
-- Stronger protocol authentication
 - Replay attack protection
 - Key lifecycle management
 - User authentication
 - Rate limiting
-- Better error handling
 - Security logging
 - Automated security testing
 - Formal protocol specification
@@ -221,24 +182,21 @@ The project was developed to practice:
 - Asymmetric cryptography
 - Hybrid encryption
 - Network protocols
+- Key pinning and fingerprint verification
 - Linux development
 - Git and GitHub
 
+## Implemented Security Improvements
+
+- [✓] AES-256-GCM authenticated encryption
+- [✓] MITM protection via TOFU key pinning (SSH-style)
+- [✓] Packet size limits (DoS hardening)
+- [✓] Thread-safe broadcasting (no lock contention)
+- [✓] Persistent server key with fingerprint verification
+
 ## Future Improvements
 
-- [ ] AES-GCM authenticated encryption
 - [ ] Replay protection
 - [ ] User authentication
 - [ ] Private messaging
 - [ ] Chat rooms
-- [ ] Rate limiting
-- [ ] Security logging
-- [ ] Automated tests
-- [ ] Protocol documentation
-- [ ] Improved exception handling
-
-## Disclaimer
-
-Undercover is an educational project developed for learning purposes.
-
-The project should not be used to protect sensitive or production communications without further security review and testing.
