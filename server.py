@@ -2,7 +2,7 @@ import socket
 import threading
 import sys
 import re
-
+import os
 from modules import makeup
 
 makeup.wipe()
@@ -13,7 +13,10 @@ from modules.crypto import (
     load_public_key,
     rsa_decrypt,
     aes_decrypt,
-    aes_encrypt
+    aes_encrypt,
+    save_private_key,
+    load_private_key,
+    public_key_fingerprint
 )
 
 from modules.protocol import (
@@ -35,11 +38,21 @@ except (IndexError, ValueError):
 clients = {}
 lock = threading.Lock()
 
+KEYPATH = "server_key.pem"
 
 # RSA key pair for this server instance
-private_key, public_key = generate_rsa_keys()
+if os.path.exists(KEYPATH):
+    private_key, public_key = load_private_key(KEYPATH)
+else:
+    private_key, public_key = generate_rsa_keys()
+    save_private_key(private_key,KEYPATH)
+
 public_key_bytes = public_key_to_bytes(public_key)
 
+# Print the fingerprint so clients can pin it (pass it to the client as an argument).
+FINGERPRINT = public_key_fingerprint(public_key)
+print(f"{makeup.TextColor['cyan']}[SERVER] Public key fingerprint:")
+print(f"{makeup.TextColor['cyan']}  {FINGERPRINT}")
 
 def broadcast(message, exclude=None):
     """
@@ -164,4 +177,4 @@ if __name__ == "__main__":
         start_server()
     except KeyboardInterrupt:
         print(makeup.TextColor["cyan"], "\n[**] Server shutting down...")
-        
+

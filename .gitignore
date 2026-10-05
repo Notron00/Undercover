@@ -8,3 +8,4 @@ venv/
 *.pem
 *.key
 *.bak
+server_key.pem
