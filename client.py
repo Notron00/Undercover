@@ -100,7 +100,7 @@ else:
         save_known_hosts(known_hosts)
         print(makeup.TextColor["cyan"], "[+] Server remembered.")
     elif saved != actual_fingerprint:
-        # Known host, but the key changed — possible MITM.
+        # Known host, but the key changed — possible MITM Bruh.
         print(makeup.TextColor["red"], "[!] WARNING: SERVER KEY CHANGED — possible MITM attack!")
         print(makeup.TextColor["red"], f"    previously trusted: {saved}")
         print(makeup.TextColor["red"], f"    now received:       {actual_fingerprint}")
@@ -138,7 +138,7 @@ while True:
 
 
 print("[+] Connected securely.")
-print("[+] AES-encrypted chat started (AES session key exchanged via RSA).")
+print("[+] AES-encrypted chat started (AES session key exchanged via RSA).") 
 
 
 def receive():
@@ -154,7 +154,7 @@ def receive():
             break
 
 
-def send():
+def send(): # Send function that sends the message in text w/ emcrypted data. (I'll harden that/these with pgp after)
     while True:
         try:
             message = session.prompt(f"{username}~$ ")
