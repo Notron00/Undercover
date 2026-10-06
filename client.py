@@ -48,11 +48,20 @@ except IndexError:
 
 aes_key = None
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.connect((SERVER_IP, SERVER_PORT))
 
+try:
+    sock.connect((SERVER_IP, SERVER_PORT))
+    # Receive and verify the server's RSA public key
+    server_public_bytes = recv_packet(sock)
+except (ConnectionError, ConnectionRefusedError, OSError):
+    print(makeup.TextColor["red"], "[!] Could not reach the server.")
+    print(makeup.TextColor["red"], "    It may be offline, or your address is temporarily rate-limited. Try again later.")
+    try:
+        sock.close()
+    except Exception:
+        pass
+    exit()
 
-# Receive and verify the server's RSA public key
-server_public_bytes = recv_packet(sock)
 actual_fingerprint = fingerprint_from_bytes(server_public_bytes)
 
 KNOWN_HOSTS_PATH = os.path.expanduser("~/.undercover_known_hosts")
@@ -158,24 +167,39 @@ while True:
 
     if status == "LOGIN":
         print(makeup.TextColor["cyan"], "[*] Existing user — enter your password")
-        authed = False
         while True:
             pw = getpass.getpass("    Password: ")
-            send_enc(pw)
-            result = recv_enc()
+            try:
+                send_enc(pw)
+                result = recv_enc()
+            except (BrokenPipeError, ConnectionError, OSError):
+                print(makeup.TextColor["red"], "[!] Connection closed by server (too many attempts).")
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                exit()
             if result == "AUTH_OK":
                 print(makeup.TextColor["cyan"], "[+] Logged in.")
-                authed = True
                 break
             elif result == "AUTH_FAIL":
                 print(makeup.TextColor["red"], "[!] Wrong password, try again.")
                 continue
             elif result == "AUTH_LOCKED":
-                print(makeup.TextColor["red"], "[!] Too many attempts. Connection closed.")
-                sock.close()
+                print(makeup.TextColor["red"], "[!] Too many attempts. Account temporarily locked. Try again later.")
+                try:
+                    sock.close()
+                except Exception:
+                    pass
                 exit()
-        if authed:
-            break
+            else:
+                print(makeup.TextColor["red"], "[!] Unexpected server response.")
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                exit()
+        break
 
 
 print("[+] Connected securely.")

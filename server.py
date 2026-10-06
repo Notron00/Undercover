@@ -29,16 +29,15 @@ from modules.protocol import (
     recv_packet
 )
 
+from modules.ratelimit import is_locked, record_failure, reset_failures
+
 makeup.dancinnn()
 
 HOST = "0.0.0.0"
+MAX_PASSWORD_ATTEMPTS = 3
 MAX_CONNECTIONS = 100
 HANDSHAKE_TIMEOUT = 30
-MAX_PASSWORD_ATTEMPTS = 3
-LOCKOUT_THRESHOLD = 5
-LOCKOUT_SECONDS = 60
 USERS_PATH = "users.json"
-connection_slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
 
 try:
     PORT = int(sys.argv[1])
@@ -47,11 +46,11 @@ except (IndexError, ValueError):
     exit()
 
 
-# Rate limiting (in-memory, not logged, cleared on restart).
-# Keyed by IP and by account; each value is [failure_count, first_failure_time].
+# Rate limiting state (dicts live here; the logic lives in modules/ratelimit.py).
 ip_failures = {}
 account_failures = {}
-ratelimit_lock = threading.Lock()
+
+connection_slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
 
 clients = {}
 rooms = {}
@@ -91,40 +90,6 @@ public_key_bytes = public_key_to_bytes(public_key)
 FINGERPRINT = public_key_fingerprint(public_key)
 print(f"{makeup.TextColor['cyan']}[SERVER] Public key fingerprint:")
 print(f"{makeup.TextColor['cyan']}  {FINGERPRINT}")
-
-
-# ---------- Rate limiting helpers ----------
-
-def _is_locked(store, key):
-    """Returns True if this key is currently in a lockout window."""
-    with ratelimit_lock:
-        entry = store.get(key)
-        if entry is None:
-            return False
-        count, first_ts = entry
-        if count < LOCKOUT_THRESHOLD:
-            return False
-        if time.time() - first_ts >= LOCKOUT_SECONDS:
-            del store[key]  # window passed, reset
-            return False
-        return True
-
-
-def _record_failure(store, key):
-    """Records one failed attempt for this key."""
-    with ratelimit_lock:
-        entry = store.get(key)
-        now = time.time()
-        if entry is None or (now - entry[1]) >= LOCKOUT_SECONDS:
-            store[key] = [1, now]
-        else:
-            entry[0] += 1
-
-
-def _reset_failures(store, key):
-    """Clears failures for this key (called on successful login)."""
-    with ratelimit_lock:
-        store.pop(key, None)
 
 
 # ---------- Messaging helpers ----------
@@ -281,14 +246,12 @@ def authenticate(conn, aes_key, ip):
             registered = key in users
 
         if registered:
-            # Account-level lockout: refuse if this account is temporarily locked,
-            # regardless of which IP is trying (defeats distributed brute-force).
-            if _is_locked(account_failures, key):
+            # Account-level lockout (defeats distributed brute-force).
+            if is_locked(account_failures, key):
                 send_enc(conn, aes_key, send_seq, "AUTH_LOCKED")
                 send_seq += 1
                 return None, send_seq
 
-            # LOGIN flow
             send_enc(conn, aes_key, send_seq, "LOGIN")
             send_seq += 1
             for _ in range(MAX_PASSWORD_ATTEMPTS):
@@ -298,15 +261,13 @@ def authenticate(conn, aes_key, ip):
                 if stored and verify_password(password, stored.encode("utf-8")):
                     send_enc(conn, aes_key, send_seq, "AUTH_OK")
                     send_seq += 1
-                    _reset_failures(account_failures, key)
-                    _reset_failures(ip_failures, ip)
+                    reset_failures(account_failures, key)
+                    reset_failures(ip_failures, ip)
                     return username, send_seq
-                # Wrong password: record against both the account and the IP.
-                _record_failure(account_failures, key)
-                _record_failure(ip_failures, ip)
+                record_failure(account_failures, key)
+                record_failure(ip_failures, ip)
                 send_enc(conn, aes_key, send_seq, "AUTH_FAIL")
                 send_seq += 1
-            # Out of attempts for this connection.
             send_enc(conn, aes_key, send_seq, "AUTH_LOCKED")
             send_seq += 1
             return None, send_seq
@@ -333,13 +294,15 @@ def handle_client(conn, addr):
     username = "Unknown"
 
     # Reject connections from an IP that is currently rate-limited.
-    if _is_locked(ip_failures, ip):
+    if is_locked(ip_failures, ip):
         print(f"[!] Rejected connection from rate-limited IP {ip}")
         try:
             conn.close()
         except Exception:
             pass
         return
+
+    # Cap concurrent connections (anti flood DoS).
     if not connection_slots.acquire(blocking=False):
         print(f"[!] Connection limit reached, rejecting {ip}")
         try:
@@ -347,8 +310,9 @@ def handle_client(conn, addr):
         except Exception:
             pass
         return
-    conn.settimeout(HANDSHAKE_TIMEOUT)
 
+    # Drop connections that don't complete the handshake in time (anti slowloris).
+    conn.settimeout(HANDSHAKE_TIMEOUT)
 
     try:
         send_packet(conn, public_key_bytes)
@@ -359,6 +323,8 @@ def handle_client(conn, addr):
         if username is None:
             print("[***] Authentication failed, closing connection")
             return
+
+        # Handshake done — remove the timeout so idle chatting isn't dropped.
         conn.settimeout(None)
 
         with lock:
@@ -424,6 +390,7 @@ def handle_client(conn, addr):
             broadcast(f"[SERVER] {username} left chat.", left_room)
         print(f"[-] {username} disconnected...")
         connection_slots.release()
+
 
 def start_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
