@@ -1,4 +1,5 @@
 # Undercover
+![Tests](https://github.com/Notron00/Undercover/actions/workflows/tests.yml/badge.svg)
 ![Version](https://img.shields.io/badge/version-1.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow)
 ![License](https://img.shields.io/badge/license-MIT-green)
