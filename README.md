@@ -154,21 +154,25 @@ python client.py 127.0.0.1 5555 <fingerprint>
 
 Replace `127.0.0.1` with the server's IP address when connecting from another machine.
 
+You can run server on vds/routed Port
+**TOR HiddenService supported**
+
+### Commands
+
+- `/join <room> [password]` — join or create a room (creator becomes owner)
+- `/setpass <password>` — owner sets a room password
+- `/delpass` — owner removes the room password
+- `/quit` or `/exit` — disconnect
+
 ## Security Considerations
 
 This project is primarily an educational implementation for learning network security and cryptography.
 
 While it includes MITM protection, DoS hardening, and authenticated encryption, it should not be considered a fully production-ready secure messaging application without further review.
 
-Areas that can still be improved include:
+**Password hashing**: room passwords are stored as bcrypt hashes (salted), never in plaintext
 
-- Replay attack protection
-- Key lifecycle management
-- User authentication
-- Rate limiting
-- Security logging
-- Automated security testing
-- Formal protocol specification
+
 
 ## Learning Goals
 
@@ -193,11 +197,11 @@ The project was developed to practice:
 - [✓] Packet size limits (DoS hardening)
 - [✓] Thread-safe broadcasting (no lock contention)
 - [✓] Persistent server key with fingerprint verification
-- [✓ ] Replay protection
-
+- [✓] Replay protection [DoS Hardening]
+- [✓] bcrypt password hashing for protected rooms
+- [✓] Chat rooms
 
 ## Future Improvements
 
 - [ ] User authentication
 - [ ] Private messaging
-- [ ] Chat rooms
