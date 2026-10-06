@@ -30,13 +30,13 @@ makeup.dancinnn()
 try:
     SERVER_IP = sys.argv[1]
 except IndexError:
-    print(makeup.TextColor["red"], "[!] IP can't be empty | Usage: python client.py IP PORT")
+    print(makeup.TextColor["red"], "[!] IP can't be empty")
     exit()
 
 try:
     SERVER_PORT = int(sys.argv[2])
 except (IndexError, ValueError):
-    print(makeup.TextColor["red"], "[!] PORT must be a valid number | Usage: python client.py IP PORT")
+    print(makeup.TextColor["red"], "[!] PORT must be a valid number")
     exit()
 
 # Optional: strict pinning if fingerprint is passed as an argument.
@@ -88,7 +88,6 @@ else:
     saved = known_hosts.get(host_id)
 
     if saved is None:
-        # First time seeing this server.
         print(makeup.TextColor["cyan"], f"[?] Unknown server {host_id}")
         print(makeup.TextColor["cyan"], f"    Fingerprint: {actual_fingerprint}")
         answer = input("    Trust this server and remember it? (yes/no): ").strip().lower()
@@ -100,7 +99,6 @@ else:
         save_known_hosts(known_hosts)
         print(makeup.TextColor["cyan"], "[+] Server remembered.")
     elif saved != actual_fingerprint:
-        # Known host, but the key changed — possible MITM.
         print(makeup.TextColor["red"], "[!] WARNING: SERVER KEY CHANGED — possible MITM attack!")
         print(makeup.TextColor["red"], f"    previously trusted: {saved}")
         print(makeup.TextColor["red"], f"    now received:       {actual_fingerprint}")
@@ -120,15 +118,21 @@ encrypted_aes = rsa_encrypt(server_public_key, aes_key)
 send_packet(sock, encrypted_aes)
 
 
-# Username registration loop
+# Sequence counters for replay protection
+send_seq = 0        # next sequence number we send
+expected_seq = 0    # next sequence number we expect from the server
+
+
+# Username registration loop (sequence not enforced yet during registration)
 while True:
     username = input("[?] Username: ")
 
-    encrypted_username = aes_encrypt(aes_key, username)
+    encrypted_username = aes_encrypt(aes_key, username, send_seq)
+    send_seq += 1
     send_packet(sock, encrypted_username)
 
     response = recv_packet(sock)
-    response = aes_decrypt(aes_key, response)
+    _, response = aes_decrypt(aes_key, response)
 
     if response == "USERNAME_TAKEN":
         print("[!] Username already taken")
@@ -142,10 +146,17 @@ print("[+] AES-encrypted chat started (AES session key exchanged via RSA).")
 
 
 def receive():
+    global expected_seq
     while True:
         try:
             data = recv_packet(sock)
-            message = aes_decrypt(aes_key, data)
+            seq, message = aes_decrypt(aes_key, data)
+
+            # Replay protection: drop repeated / old sequence numbers.
+            if seq < expected_seq:
+                continue
+            expected_seq = seq + 1
+
             with patch_stdout():
                 print(message)
         except Exception:
@@ -155,6 +166,7 @@ def receive():
 
 
 def send():
+    global send_seq
     while True:
         try:
             message = session.prompt(f"{username}~$ ")
@@ -164,7 +176,8 @@ def send():
                 print(makeup.TextColor["cyan"], "[**] Disconnected from the chat")
                 break
 
-            encrypted = aes_encrypt(aes_key, message)
+            encrypted = aes_encrypt(aes_key, message, send_seq)
+            send_seq += 1
             send_packet(sock, encrypted)
 
         except Exception:

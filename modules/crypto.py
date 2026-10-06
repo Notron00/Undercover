@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import os
 import hashlib
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -62,10 +63,12 @@ def aes_encrypt(key: bytes, plaintext: str):
     aes = AESGCM(key)
 
     nonce = os.urandom(12)
+    payload = Sequence.to_bytes(8,"big") + plaintext.encode("utf-8")
+
 
     ciphertext = aes.encrypt(
         nonce,
-        plaintext.encode(),
+        payload,
         None
     )
 
@@ -78,14 +81,11 @@ def aes_decrypt(key: bytes, data: bytes):
     nonce = data[:12]
 
     ciphertext = data[12:]
+    payload = aes.decrypt(nonce,ciphertext,None)
+    sequence = int.from_bytes(payload[:8],"big")
+    plaintext = payload[:8].decode("utf-8")
+    return sequence, plaintext
 
-    plaintext = aes.decrypt(
-        nonce,
-        ciphertext,
-        None
-    )
-
-    return plaintext.decode()
 def save_private_key(private_key, path: str):
     """Writes the RSA private key to disk in PEM format (unencrypted)."""
     pem = private_key.private_bytes(

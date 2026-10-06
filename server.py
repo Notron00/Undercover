@@ -3,6 +3,7 @@ import threading
 import sys
 import re
 import os
+
 from modules import makeup
 
 makeup.wipe()
@@ -38,28 +39,31 @@ except (IndexError, ValueError):
 clients = {}
 lock = threading.Lock()
 
-KEYPATH = "server_key.pem"
 
-# RSA key pair for this server instance
-if os.path.exists(KEYPATH):
-    private_key, public_key = load_private_key(KEYPATH)
+# RSA key pair, persisted to disk so the fingerprint stays stable across restarts.
+# This enables clients to pin the server's key and detect MITM attacks.
+KEY_PATH = "server_key.pem"
+
+if os.path.exists(KEY_PATH):
+    private_key, public_key = load_private_key(KEY_PATH)
 else:
     private_key, public_key = generate_rsa_keys()
-    save_private_key(private_key,KEYPATH)
+    save_private_key(private_key, KEY_PATH)
 
 public_key_bytes = public_key_to_bytes(public_key)
 
-# Print the fingerprint so clients can pin it (pass it to the client as an argument).
+# Print the fingerprint so clients can pin it.
 FINGERPRINT = public_key_fingerprint(public_key)
 print(f"{makeup.TextColor['cyan']}[SERVER] Public key fingerprint:")
 print(f"{makeup.TextColor['cyan']}  {FINGERPRINT}")
 
+
 def broadcast(message, exclude=None):
     """
-    Sends message to everyone in the chat room.
-    The client list is copied under the lock, then the lock is released
-    before the (potentially slow) network sends, so one slow client
-    cannot block the whole server.
+    Sends message to everyone in the chat room, each with its own
+    per-client send sequence number for replay protection.
+    The client list is copied under the lock, then released before the
+    (potentially slow) network sends, so one slow client cannot block the server.
     """
     with lock:
         targets = [
@@ -70,7 +74,12 @@ def broadcast(message, exclude=None):
 
     for client, aes in targets:
         try:
-            encrypted = aes_encrypt(aes, message)
+            with lock:
+                if client not in clients:
+                    continue
+                seq = clients[client]["send_seq"]
+                clients[client]["send_seq"] = seq + 1
+            encrypted = aes_encrypt(aes, message, seq)
             send_packet(client, encrypted)
         except Exception:
             pass
@@ -92,7 +101,8 @@ def handle_client(conn, addr):
         # Username registration loop
         while True:
             encrypted_name = recv_packet(conn)
-            username = aes_decrypt(aes_key, encrypted_name)
+            # sequence not enforced during registration; ignore it here
+            _, username = aes_decrypt(aes_key, encrypted_name)
             username = re.sub(r"\s+", " ", username.strip())
 
             if not username:
@@ -116,7 +126,9 @@ def handle_client(conn, addr):
 
                 clients[conn] = {
                     "username": username,
-                    "aes": aes_key
+                    "aes": aes_key,
+                    "send_seq": 0,       # next sequence number we send to this client
+                    "expected_seq": 0    # next sequence number we expect from this client
                 }
                 break
 
@@ -128,7 +140,16 @@ def handle_client(conn, addr):
         # Main message loop
         while True:
             data = recv_packet(conn)
-            message = aes_decrypt(aes_key, data)
+            seq, message = aes_decrypt(aes_key, data)
+
+            # Replay protection: reject out-of-order / repeated sequence numbers.
+            with lock:
+                expected = clients[conn]["expected_seq"]
+                if seq < expected:
+                    print(f"[!] Replay/old message from {username} (seq {seq} < {expected}), dropped")
+                    continue
+                clients[conn]["expected_seq"] = seq + 1
+
             print(f"{username}: {message}")
             broadcast(f"{username}: {message}", conn)
 
@@ -177,4 +198,3 @@ if __name__ == "__main__":
         start_server()
     except KeyboardInterrupt:
         print(makeup.TextColor["cyan"], "\n[**] Server shutting down...")
-
