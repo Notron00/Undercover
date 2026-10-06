@@ -59,7 +59,7 @@ Kod tabanı, yaygın sunucu taraflı güvenlik açıklarına karşı incelendi. 
 - **Kimlik doğrulama brute-force (düzeltildi):** Giriş denemeleri sadece bağlantı başına sınırlıydı; saldırgan tekrar bağlanıp denemeye devam edebiliyordu. IP başına ve hesap başına, geçici kilit penceresiyle rate limiting eklendi (bellekte, loglanmıyor). Hesap başına kilit, dağıtık (çok IP'li) saldırıları da engeller.
 - **Connection-flood / slowloris DoS (düzeltildi):** Server her bağlantı için sınırsız thread açıyordu ve idle timeout yoktu. Eşzamanlı bağlantı sınırı (semaphore) ve el sıkışmayı zamanında tamamlamayan bağlantıları düşüren bir handshake timeout eklendi.
 - **Mesaj replay (incelendi — düzeltme gerekmedi):** Replay zaten şu üç mekanizmayla engelleniyor: oturum başına AES anahtarı (yakalanan bir mesaj yeni oturumda çözülemez), bağlantı başına sequence number (eski sequence'ler reddedilir) ve kimlik doğrulama zorunluluğu (replay edilen bir handshake, geçerli kimlik olmadan chat mesajı gönderemez).
-- **No server-side logging**: the server prints no usernames, messages, IPs, or connection metadata — nothing is logged or persisted that could expose who talked to whom.
+- **Sunucu tarafında loglama yok**: Sunucu hiçbir kullanıcı adı, mesaj, IP veya bağlantı metadata'sı yazdırmaz — kimin kiminle konuştuğunu açığa çıkarabilecek hiçbir şey loglanmaz veya saklanmaz.
 
 ## Mimari
 
@@ -242,5 +242,6 @@ Proje şunları pratik etmek için geliştirildi:
 - [✓] Safety number ile MITM doğrulaması
 - [✓] Sessiz sunucu (metadata loglama yok)
 
-## Gelecek Geliştirmeler
+## Gelecek Geliştirmele
+- [ ] Double Ratchet
 - [ ] Windows uyumluluğu
