@@ -13,7 +13,7 @@ Undercover; ağ programlama, soket iletişimi, kriptografi ve güvenli iletişim
 
 Proje, istemci ile sunucu arasında bir AES oturum anahtarını güvenli şekilde değişmek için RSA kullanır. Anahtar değişiminden sonra sohbet iletişimi AES-256-GCM ile şifrelenir.
 
-## Contents
+## İçerikler
 
 - [Features](#features)
 - [Security Features](#security-features)
@@ -46,6 +46,20 @@ Proje, istemci ile sunucu arasında bir AES oturum anahtarını güvenli şekild
 - **MITM koruması**: TOFU tabanlı sunucu anahtarı pinning (SSH tarzı). İstemci, ilk bağlantıda sunucunun genel anahtar fingerprint'ini doğrular ve bilinen bir sunucunun anahtarı değişirse uyarır. Fingerprint argümanla da açıkça sabitlenebilir.
 - **DoS sertleştirmesi**: Paket boyutu sınırları, aşırı büyük mesajları bellek ayrılmadan önce reddeder
 - **Thread güvenli broadcast**: İstemci listesi kilit altında kopyalanır, ağ gönderiminden önce kilit bırakılır; böylece yavaş bir istemci tüm sunucuyu kilitleyemez
+- **Uçtan uca şifreleme (özel mesajlar)**: `/msg` ile yapılan yazışmalar, X25519 Diffie-Hellman ile sunucunun asla göremediği ortak bir anahtar türetir. Sunucu özel mesajları taşır ama okuyamaz.
+- **Safety number doğrulaması**: `/verify <kullanıcı>` komutu, ortak anahtardan türetilen bir güvenlik numarası gösterir. Bu numarayı karşı tarafla güvenilir bir kanaldan (telefon, yüz yüze) karşılaştırarak man-in-the-middle saldırısını tespit edebilirsiniz. Sunucu üzerinden doğrulama korumayı anlamsız kılacağından, doğrulama bilinçli olarak dış kanaldan (out-of-band) yapılır.
+- **Sunucu tarafında metadata yok**: Sunucu hiçbir kullanıcı adı, mesaj, IP veya bağlantı bilgisi yazdırmaz — kimin kiminle konuştuğunu açığa çıkarabilecek hiçbir şey loglanmaz veya saklanmaz.
+- **Uçtan uca şifrelemenin kapsamı**: E2E, özel mesajları pasif dinleyiciye ve kötü niyetli sunucuya karşı korur — *kullanıcıların safety number'ı dış kanaldan doğrulaması şartıyla*. Doğrulama yapılmazsa, ilk temasta araya giren aktif bir MITM henüz otomatik tespit edilemiyor. Oda (özel olmayan) mesajları yalnızca transport şifreleme kullanır (sunucu bunları okuyabilir). Henüz forward secrecy yok — bir oturum anahtarı sızarsa, o oturumun mesajları çözülebilir.
+
+
+## Güvenlik Sertleştirmesi
+
+Kod tabanı, yaygın sunucu taraflı güvenlik açıklarına karşı incelendi. Bulgular ve yapılanlar:
+
+- **Kimlik doğrulama brute-force (düzeltildi):** Giriş denemeleri sadece bağlantı başına sınırlıydı; saldırgan tekrar bağlanıp denemeye devam edebiliyordu. IP başına ve hesap başına, geçici kilit penceresiyle rate limiting eklendi (bellekte, loglanmıyor). Hesap başına kilit, dağıtık (çok IP'li) saldırıları da engeller.
+- **Connection-flood / slowloris DoS (düzeltildi):** Server her bağlantı için sınırsız thread açıyordu ve idle timeout yoktu. Eşzamanlı bağlantı sınırı (semaphore) ve el sıkışmayı zamanında tamamlamayan bağlantıları düşüren bir handshake timeout eklendi.
+- **Mesaj replay (incelendi — düzeltme gerekmedi):** Replay zaten şu üç mekanizmayla engelleniyor: oturum başına AES anahtarı (yakalanan bir mesaj yeni oturumda çözülemez), bağlantı başına sequence number (eski sequence'ler reddedilir) ve kimlik doğrulama zorunluluğu (replay edilen bir handshake, geçerli kimlik olmadan chat mesajı gönderemez).
+- **No server-side logging**: the server prints no usernames, messages, IPs, or connection metadata — nothing is logged or persisted that could expose who talked to whom.
 
 ## Mimari
 
@@ -192,13 +206,6 @@ MITM koruması, DoS sertleştirmesi ve authenticated encryption içermesine rağ
 
 **Şifre hash'leme**: Oda ve kullanıcı şifreleri düz metin olarak değil, bcrypt hash'leri (salt'lı) olarak saklanır.
 
-## Güvenlik Sertleştirmesi
-
-Kod tabanı, yaygın sunucu taraflı güvenlik açıklarına karşı incelendi. Bulgular ve yapılanlar:
-
-- **Kimlik doğrulama brute-force (düzeltildi):** Giriş denemeleri sadece bağlantı başına sınırlıydı; saldırgan tekrar bağlanıp denemeye devam edebiliyordu. IP başına ve hesap başına, geçici kilit penceresiyle rate limiting eklendi (bellekte, loglanmıyor). Hesap başına kilit, dağıtık (çok IP'li) saldırıları da engeller.
-- **Connection-flood / slowloris DoS (düzeltildi):** Server her bağlantı için sınırsız thread açıyordu ve idle timeout yoktu. Eşzamanlı bağlantı sınırı (semaphore) ve el sıkışmayı zamanında tamamlamayan bağlantıları düşüren bir handshake timeout eklendi.
-- **Mesaj replay (incelendi — düzeltme gerekmedi):** Replay zaten şu üç mekanizmayla engelleniyor: oturum başına AES anahtarı (yakalanan bir mesaj yeni oturumda çözülemez), bağlantı başına sequence number (eski sequence'ler reddedilir) ve kimlik doğrulama zorunluluğu (replay edilen bir handshake, geçerli kimlik olmadan chat mesajı gönderemez).
 
 ## Öğrenme Hedefleri
 
@@ -231,8 +238,9 @@ Proje şunları pratik etmek için geliştirildi:
 - [✓] Server_key.pem dosyası artık sahip yetkisine sahip (0600 kuralı)
 - [✓] Brute-force'a karşı rate limiting (IP + hesap kilidi)
 - [✓] Flood/slowloris DoS'a karşı bağlantı sınırı ve handshake timeout
+- [✓] Özel mesajlar için uçtan uca şifreleme (X25519 + AES-256-GCM)
+- [✓] Safety number ile MITM doğrulaması
+- [✓] Sessiz sunucu (metadata loglama yok)
 
 ## Gelecek Geliştirmeler
-
-- [ ] E2EE (Uçtan Uca Şifreleme)
 - [ ] Windows uyumluluğu

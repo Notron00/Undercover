@@ -46,6 +46,20 @@ The project uses RSA to securely exchange an AES session key between the client 
 - **MITM protection**: TOFU-based server key pinning (SSH-style). The client verifies the server's public key fingerprint on first connection and warns if a known server's key ever changes. A fingerprint can also be pinned explicitly via argument.
 - **DoS hardening**: packet size limits reject oversized messages before allocating memory
 - **Thread-safe broadcasting**: the client list is copied under a lock, then released before network sends, so one slow client cannot block the server
+- **End-to-end encryption (private messages)**: `/msg` conversations use X25519 Diffie-Hellman to derive a shared key the server never sees. The server relays private messages but cannot read them.
+- **Safety number verification**: `/verify <user>` shows a safety number derived from the shared key. Compare it with the other person over a trusted channel (call, in person) to detect a man-in-the-middle. Comparing it through the server would defeat the purpose, so verification is intentionally out-of-band.
+
+- **End-to-end encryption scope**: E2E protects private messages against a passive eavesdropper and a malicious server, *provided users verify the safety number out-of-band*. Without verification, an active MITM at first contact cannot be detected automatically yet. Room (non-private) messages use transport encryption only (the server can read them). There is no forward secrecy yet — if a session key leaks, that session's messages can be decrypted.
+
+
+## Security Hardening
+
+The codebase was reviewed for common server-side vulnerabilities. Findings and actions:
+
+- **Authentication brute-force (fixed):** Login attempts were only limited per-connection, so an attacker could reconnect and keep guessing. Added IP-based and account-based rate limiting with a temporary lockout window (in-memory, not logged). Account-level lockout also defeats distributed (multi-IP) attacks.
+- **Connection-flood / slowloris DoS (fixed):** The server spawned an unbounded thread per connection and had no idle timeout. Added a concurrent-connection cap (semaphore) and a handshake timeout that drops connections which don't complete the handshake in time.
+- **Message replay (reviewed — no fix needed):** Replay is already prevented by per-session AES keys (a captured message can't be decrypted in a new session), per-connection sequence numbers (old sequence numbers are rejected), and the authentication requirement (a replayed handshake still can't send chat messages without valid credentials).
+- **No server-side logging**: the server prints no usernames, messages, IPs, or connection metadata — nothing is logged or persisted that could expose who talked to whom.
 
 ## Architecture
 
@@ -183,6 +197,7 @@ You can run server on vds/routed Port
 - `/delpass` — owner removes the room password
 - `/quit` or `/exit` — disconnect
 - `/msg <user> <message>` — send a private message
+- `/verify <user>` — show the safety number for an E2E session (compare out-of-band to detect MITM)
 
 ## Security Considerations
 
@@ -192,13 +207,6 @@ While it includes MITM protection, DoS hardening, and authenticated encryption, 
 
 **Password hashing**: room passwords are stored as bcrypt hashes (salted), never in plaintext
 
-## Security Hardening
-
-The codebase was reviewed for common server-side vulnerabilities. Findings and actions:
-
-- **Authentication brute-force (fixed):** Login attempts were only limited per-connection, so an attacker could reconnect and keep guessing. Added IP-based and account-based rate limiting with a temporary lockout window (in-memory, not logged). Account-level lockout also defeats distributed (multi-IP) attacks.
-- **Connection-flood / slowloris DoS (fixed):** The server spawned an unbounded thread per connection and had no idle timeout. Added a concurrent-connection cap (semaphore) and a handshake timeout that drops connections which don't complete the handshake in time.
-- **Message replay (reviewed — no fix needed):** Replay is already prevented by per-session AES keys (a captured message can't be decrypted in a new session), per-connection sequence numbers (old sequence numbers are rejected), and the authentication requirement (a replayed handshake still can't send chat messages without valid credentials).
 
 
 ## Learning Goals
@@ -232,8 +240,11 @@ The project was developed to practice:
 - [✓] Server_key.pem file is now owner only (0600 rule)
 - [✓] Rate limiting (IP + account lockout) against auth brute-force
 - [✓] Connection limit and handshake timeout against flood/slowloris DoS
+- [✓] End-to-end encryption for private messages (X25519 + AES-256-GCM)
+- [✓] Safety number verification (MITM detection)
+- [✓] Silent server (no metadata logging)
 
 ## Future Improvements
-- [ ] E2EE (End-to-End Encryption) 
+- [ ] Double Ratchet
 - [ ] Windows compatibility
 
