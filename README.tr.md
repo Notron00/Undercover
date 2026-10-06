@@ -191,6 +191,14 @@ MITM koruması, DoS sertleştirmesi ve authenticated encryption içermesine rağ
 
 **Şifre hash'leme**: Oda ve kullanıcı şifreleri düz metin olarak değil, bcrypt hash'leri (salt'lı) olarak saklanır.
 
+## Güvenlik Sertleştirmesi
+
+Kod tabanı, yaygın sunucu taraflı güvenlik açıklarına karşı incelendi. Bulgular ve yapılanlar:
+
+- **Kimlik doğrulama brute-force (düzeltildi):** Giriş denemeleri sadece bağlantı başına sınırlıydı; saldırgan tekrar bağlanıp denemeye devam edebiliyordu. IP başına ve hesap başına, geçici kilit penceresiyle rate limiting eklendi (bellekte, loglanmıyor). Hesap başına kilit, dağıtık (çok IP'li) saldırıları da engeller.
+- **Connection-flood / slowloris DoS (düzeltildi):** Server her bağlantı için sınırsız thread açıyordu ve idle timeout yoktu. Eşzamanlı bağlantı sınırı (semaphore) ve el sıkışmayı zamanında tamamlamayan bağlantıları düşüren bir handshake timeout eklendi.
+- **Mesaj replay (incelendi — düzeltme gerekmedi):** Replay zaten şu üç mekanizmayla engelleniyor: oturum başına AES anahtarı (yakalanan bir mesaj yeni oturumda çözülemez), bağlantı başına sequence number (eski sequence'ler reddedilir) ve kimlik doğrulama zorunluluğu (replay edilen bir handshake, geçerli kimlik olmadan chat mesajı gönderemez).
+
 ## Öğrenme Hedefleri
 
 Proje şunları pratik etmek için geliştirildi:
@@ -220,6 +228,8 @@ Proje şunları pratik etmek için geliştirildi:
 - [✓] Kullanıcı kimlik doğrulama (user authentication)
 - [✓] Özel mesajlaşma (private messaging)
 - [✓] Server_key.pem dosyası artık sahip yetkisine sahip (0600 kuralı)
+- [✓] Brute-force'a karşı rate limiting (IP + hesap kilidi)
+- [✓] Flood/slowloris DoS'a karşı bağlantı sınırı ve handshake timeout
 
 ## Gelecek Geliştirmeler
 
