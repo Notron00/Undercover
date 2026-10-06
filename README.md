@@ -191,6 +191,13 @@ While it includes MITM protection, DoS hardening, and authenticated encryption, 
 
 **Password hashing**: room passwords are stored as bcrypt hashes (salted), never in plaintext
 
+## Security Hardening
+
+The codebase was reviewed for common server-side vulnerabilities. Findings and actions:
+
+- **Authentication brute-force (fixed):** Login attempts were only limited per-connection, so an attacker could reconnect and keep guessing. Added IP-based and account-based rate limiting with a temporary lockout window (in-memory, not logged). Account-level lockout also defeats distributed (multi-IP) attacks.
+- **Connection-flood / slowloris DoS (fixed):** The server spawned an unbounded thread per connection and had no idle timeout. Added a concurrent-connection cap (semaphore) and a handshake timeout that drops connections which don't complete the handshake in time.
+- **Message replay (reviewed — no fix needed):** Replay is already prevented by per-session AES keys (a captured message can't be decrypted in a new session), per-connection sequence numbers (old sequence numbers are rejected), and the authentication requirement (a replayed handshake still can't send chat messages without valid credentials).
 
 
 ## Learning Goals
@@ -222,7 +229,8 @@ The project was developed to practice:
 - [✓] User authentication
 - [✓] Private messaging
 - [✓] Server_key.pem file is now owner only (0600 rule)
-
+- [✓] Rate limiting (IP + account lockout) against auth brute-force
+- [✓] Connection limit and handshake timeout against flood/slowloris DoS
 
 ## Future Improvements
 - [ ] E2EE (End-to-End Encryption) 
