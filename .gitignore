@@ -9,3 +9,5 @@ venv/
 *.key
 *.bak
 server_key.pem
+users.json
+users.json

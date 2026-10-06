@@ -3,6 +3,7 @@ import threading
 import sys
 import re
 import os
+import json
 
 from modules import makeup
 
@@ -30,6 +31,8 @@ from modules.protocol import (
 makeup.dancinnn()
 
 HOST = "0.0.0.0"
+MAX_PASSWORD_ATTEMPTS = 3
+USERS_PATH = "users.json"
 
 try:
     PORT = int(sys.argv[1])
@@ -39,9 +42,27 @@ except (IndexError, ValueError):
 
 
 clients = {}
-# rooms[name] = {"owner": username, "pass_hash": bytes or None}
 rooms = {}
+users = {}            # username (casefold) -> bcrypt hash (str)
 lock = threading.Lock()
+users_lock = threading.Lock()
+
+
+def load_users():
+    try:
+        with open(USERS_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_users():
+    with users_lock:
+        with open(USERS_PATH, "w") as f:
+            json.dump(users, f, indent=2)
+
+
+users = load_users()
 
 
 # RSA key pair, persisted to disk.
@@ -60,8 +81,13 @@ print(f"{makeup.TextColor['cyan']}[SERVER] Public key fingerprint:")
 print(f"{makeup.TextColor['cyan']}  {FINGERPRINT}")
 
 
+def send_enc(conn, aes_key, seq, message):
+    """Send one encrypted message during the pre-registration handshake."""
+    send_packet(conn, aes_encrypt(aes_key, message, seq))
+
+
 def send_to(conn, message):
-    """Send a one-off system message to a single client (with its own send seq)."""
+    """Send a one-off system message to a single already-registered client."""
     try:
         with lock:
             if conn not in clients:
@@ -74,47 +100,14 @@ def send_to(conn, message):
     except Exception:
         pass
 
-def do_msg(conn, username, args):
-    """Handle /msg <user> <message> — private message to a single user."""
-    parts = args.split(" ", 1)
-    if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
-        send_to(conn, "[SERVER] Usage: /msg <user> <message>")
-        return
-
-    target_name = parts[0].strip()
-    text = parts[1].strip()
-
-    # Find the target user's connection (case-insensitive).
-    with lock:
-        target_conn = None
-        for c, data in clients.items():
-            if data["username"].casefold() == target_name.casefold():
-                target_conn = c
-                real_name = data["username"]
-                break
-
-    if target_conn is None:
-        send_to(conn, f"[SERVER] User '{target_name}' not found or offline.")
-        return
-
-    if target_conn == conn:
-        send_to(conn, "[SERVER] You can't private-message yourself.")
-        return
-
-    # Deliver to target, and echo a confirmation to the sender.
-    send_to(target_conn, f"[PM from {username}] {text}")
-    send_to(conn, f"[PM to {real_name}] {text}")
-    print(f"[PM] {username} -> {real_name}: {text}")
 
 def broadcast(message, room, exclude=None):
-    """Send message only to clients in the given room."""
     with lock:
         targets = [
             (client, data["aes"])
             for client, data in clients.items()
             if client != exclude and data["room"] == room
         ]
-
     for client, aes in targets:
         try:
             with lock:
@@ -129,7 +122,6 @@ def broadcast(message, room, exclude=None):
 
 
 def do_join(conn, username, args):
-    """Handle /join <room> [password]."""
     parts = args.split(" ", 1)
     new_room = parts[0].strip()
     password = parts[1].strip() if len(parts) > 1 else None
@@ -141,20 +133,16 @@ def do_join(conn, username, args):
     with lock:
         old_room = clients[conn]["room"]
         room_info = rooms.get(new_room)
-
         if room_info is None:
-            # Room doesn't exist: create it, caller becomes owner.
             rooms[new_room] = {"owner": username, "pass_hash": None}
             created = True
         else:
             created = False
             pass_hash = room_info["pass_hash"]
             if pass_hash is not None:
-                # Room is password-protected.
                 if password is None or not verify_password(password, pass_hash):
                     send_to(conn, f"[SERVER] Wrong or missing password for '{new_room}'")
                     return
-
         clients[conn]["room"] = new_room
 
     broadcast(f"[SERVER] {username} left the room.", old_room, conn)
@@ -166,12 +154,10 @@ def do_join(conn, username, args):
 
 
 def do_setpass(conn, username, args):
-    """Handle /setpass <password> — only the owner of the current room."""
     password = args.strip()
     if not password:
         send_to(conn, "[SERVER] Usage: /setpass <password>")
         return
-
     with lock:
         room = clients[conn]["room"]
         room_info = rooms.get(room)
@@ -179,13 +165,10 @@ def do_setpass(conn, username, args):
             send_to(conn, "[SERVER] Only the room owner can set a password.")
             return
         room_info["pass_hash"] = hash_password(password)
-
     send_to(conn, f"[SERVER] Password set for '{room}'.")
-    print(f"[*] {username} set a password for room '{room}'")
 
 
 def do_delpass(conn, username, args):
-    """Handle /delpass — owner removes the room password."""
     with lock:
         room = clients[conn]["room"]
         room_info = rooms.get(room)
@@ -193,64 +176,127 @@ def do_delpass(conn, username, args):
             send_to(conn, "[SERVER] Only the room owner can remove the password.")
             return
         room_info["pass_hash"] = None
-
     send_to(conn, f"[SERVER] Password removed for '{room}'.")
-    print(f"[*] {username} removed the password for room '{room}'")
+
+
+def do_msg(conn, username, args):
+    parts = args.split(" ", 1)
+    if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+        send_to(conn, "[SERVER] Usage: /msg <user> <message>")
+        return
+    target_name = parts[0].strip()
+    text = parts[1].strip()
+    with lock:
+        target_conn = None
+        for c, data in clients.items():
+            if data["username"].casefold() == target_name.casefold():
+                target_conn = c
+                real_name = data["username"]
+                break
+    if target_conn is None:
+        send_to(conn, f"[SERVER] User '{target_name}' not found or offline.")
+        return
+    if target_conn == conn:
+        send_to(conn, "[SERVER] You can't private-message yourself.")
+        return
+    send_to(target_conn, f"[PM from {username}] {text}")
+    send_to(conn, f"[PM to {real_name}] {text}")
+    print(f"[PM] {username} -> {real_name}: {text}")
+
+
+def authenticate(conn, aes_key):
+    """
+    Handshake that establishes an authenticated username.
+    Returns (username, next_seq) on success, or (None, _) on failure.
+    """
+    send_seq = 0
+
+    while True:
+        # 1. Receive desired username
+        _, username = aes_decrypt(aes_key, recv_packet(conn))
+        username = re.sub(r"\s+", " ", username.strip())
+
+        if not username:
+            send_enc(conn, aes_key, send_seq, "USERNAME_INVALID")
+            send_seq += 1
+            continue
+
+        key = username.casefold()
+
+        # Reject if this user is already online.
+        with lock:
+            online = any(d["username"].casefold() == key for d in clients.values())
+        if online:
+            send_enc(conn, aes_key, send_seq, "ONLINE")
+            send_seq += 1
+            continue
+
+        with users_lock:
+            registered = key in users
+
+        if registered:
+            # LOGIN flow
+            send_enc(conn, aes_key, send_seq, "LOGIN")
+            send_seq += 1
+            for _ in range(MAX_PASSWORD_ATTEMPTS):
+                _, password = aes_decrypt(aes_key, recv_packet(conn))
+                with users_lock:
+                    stored = users.get(key)
+                if stored and verify_password(password, stored.encode("utf-8")):
+                    send_enc(conn, aes_key, send_seq, "AUTH_OK")
+                    send_seq += 1
+                    return username, send_seq
+                send_enc(conn, aes_key, send_seq, "AUTH_FAIL")
+                send_seq += 1
+            # Out of attempts
+            send_enc(conn, aes_key, send_seq, "AUTH_LOCKED")
+            send_seq += 1
+            return None, send_seq
+        else:
+            # REGISTER flow
+            send_enc(conn, aes_key, send_seq, "REGISTER")
+            send_seq += 1
+            _, password = aes_decrypt(aes_key, recv_packet(conn))
+            if not password.strip():
+                send_enc(conn, aes_key, send_seq, "AUTH_FAIL")
+                send_seq += 1
+                continue
+            with users_lock:
+                users[key] = hash_password(password).decode("utf-8")
+            save_users()
+            send_enc(conn, aes_key, send_seq, "AUTH_OK")
+            send_seq += 1
+            return username, send_seq
 
 
 def handle_client(conn, addr):
     print(f"[+] Connection: {addr}")
-
     username = "Unknown"
 
     try:
         send_packet(conn, public_key_bytes)
-
         encrypted_aes = recv_packet(conn)
         aes_key = rsa_decrypt(private_key, encrypted_aes)
 
-        # Username registration loop
-        while True:
-            encrypted_name = recv_packet(conn)
-            _, username = aes_decrypt(aes_key, encrypted_name)
-            username = re.sub(r"\s+", " ", username.strip())
+        username, send_seq = authenticate(conn, aes_key)
+        if username is None:
+            print("[***] Authentication failed, closing connection")
+            return
 
-            if not username:
-                send_packet(conn, aes_encrypt(aes_key, "USERNAME_INVALID"))
-                print("[***] Rejected! Empty username")
-                continue
+        with lock:
+            clients[conn] = {
+                "username": username,
+                "aes": aes_key,
+                "send_seq": send_seq,
+                "expected_seq": 0,
+                "room": "lobby"
+            }
+            if "lobby" not in rooms:
+                rooms["lobby"] = {"owner": None, "pass_hash": None}
 
-            with lock:
-                normalized_username = username.casefold()
-                username_taken = any(
-                    re.sub(r"\s+", " ", cd["username"].strip()).casefold()
-                    == normalized_username
-                    for cd in clients.values()
-                )
-
-                if username_taken:
-                    send_packet(conn, aes_encrypt(aes_key, "USERNAME_TAKEN"))
-                    print("[***] Rejected! Username already taken")
-                    continue
-
-                clients[conn] = {
-                    "username": username,
-                    "aes": aes_key,
-                    "send_seq": 0,
-                    "expected_seq": 0,
-                    "room": "lobby"
-                }
-                # Ensure the lobby exists (ownerless default room).
-                if "lobby" not in rooms:
-                    rooms["lobby"] = {"owner": None, "pass_hash": None}
-                break
-
-        send_packet(conn, aes_encrypt(aes_key, "USERNAME_OK"))
-
-        print(f"[+] {username} joined")
+        print(f"[+] {username} authenticated and joined")
         broadcast(f"[SERVER] {username} joined lobby.", "lobby", conn)
 
-        # Main message loop
         while True:
             data = recv_packet(conn)
             seq, message = aes_decrypt(aes_key, data)
@@ -262,7 +308,6 @@ def handle_client(conn, addr):
                     continue
                 clients[conn]["expected_seq"] = seq + 1
 
-            # Commands
             if message.startswith("/join "):
                 do_join(conn, username, message[len("/join "):])
                 continue
@@ -276,7 +321,6 @@ def handle_client(conn, addr):
                 do_msg(conn, username, message[len("/msg "):])
                 continue
 
-            # Normal message
             with lock:
                 room = clients[conn]["room"]
             print(f"[{room}] {username}: {message}")
@@ -294,15 +338,12 @@ def handle_client(conn, addr):
                 del clients[conn]
             else:
                 username = "Unknown"
-
         try:
             conn.close()
         except Exception:
             pass
-
         if username != "Unknown":
             broadcast(f"[SERVER] {username} left chat.", left_room)
-
         print(f"[-] {username} disconnected...")
 
 
@@ -311,16 +352,10 @@ def start_server():
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((HOST, PORT))
     server.listen()
-
     print(f"{makeup.TextColor['cyan']}\n[SERVER] Listening {HOST}:{PORT}")
-
     while True:
         conn, addr = server.accept()
-        thread = threading.Thread(
-            target=handle_client,
-            args=(conn, addr),
-            daemon=True
-        )
+        thread = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
         thread.start()
 
 
