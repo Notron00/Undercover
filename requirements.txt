@@ -4,3 +4,4 @@ colored==2.3.2
 pystyle==2.9
 art==6.5
 bcrypt==5.0.0
+pytest==9.1.1
