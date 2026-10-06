@@ -205,6 +205,7 @@ The project was developed to practice:
 - [✓] Chat rooms
 - [✓] User authentication
 - [✓] Private messaging
+- [✓] Server_key.pm file is now owner only (0600 rule)
 
 
 ## Future Improvements

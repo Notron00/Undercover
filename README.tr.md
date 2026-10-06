@@ -203,6 +203,7 @@ Proje şunları pratik etmek için geliştirildi:
 - [✓] Sohbet odaları
 - [✓] Kullanıcı kimlik doğrulama (user authentication)
 - [✓] Özel mesajlaşma (private messaging)
+- [✓] Server_key.pm dosyası artık sahip yetkisine sahip (0600 kuralı)
 
 ## Gelecek Geliştirmeler
 
