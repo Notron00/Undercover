@@ -193,10 +193,11 @@ The project was developed to practice:
 - [✓] Packet size limits (DoS hardening)
 - [✓] Thread-safe broadcasting (no lock contention)
 - [✓] Persistent server key with fingerprint verification
+- [✓ ] Replay protection
+
 
 ## Future Improvements
 
-- [ ] Replay protection
 - [ ] User authentication
 - [ ] Private messaging
 - [ ] Chat rooms
