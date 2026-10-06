@@ -1,5 +1,7 @@
 # Undercover
 
+> [🇬🇧 English](README.md) | 🇹🇷 Türkçe
+
 > Educational encrypted TCP chat application written in Python.
 
 Undercover is a client-server TCP chat application developed to explore network programming, socket communication, cryptography, and secure communication protocols.
