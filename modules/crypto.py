@@ -1,9 +1,9 @@
 from collections.abc import Sequence
 import os
 import hashlib
+import bcrypt
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
-
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
@@ -30,6 +30,19 @@ def public_key_to_bytes(public_key):
 def load_public_key(data):
     return serialization.load_pem_public_key(data)
 
+# ---------------- PASSWORD HASHING ---------------- #
+
+def hash_password(password: str) -> bytes:
+    """Hashes a password with bcrypt (salt is generated and embedded automatically)."""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+
+
+def verify_password(password: str, hashed: bytes) -> bool:
+    """Checks a password against a stored bcrypt hash. Returns True if it matches."""
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed)
+    except (ValueError, TypeError):
+        return False
 
 def rsa_encrypt(public_key, data: bytes):
     return public_key.encrypt(
@@ -59,31 +72,21 @@ def generate_aes_key():
     return AESGCM.generate_key(bit_length=256)
 
 
-def aes_encrypt(key: bytes, plaintext: str):
+def aes_encrypt(key: bytes, plaintext: str, sequence: int = 0):
     aes = AESGCM(key)
-
     nonce = os.urandom(12)
-    payload = Sequence.to_bytes(8,"big") + plaintext.encode("utf-8")
-
-
-    ciphertext = aes.encrypt(
-        nonce,
-        payload,
-        None
-    )
-
+    payload = sequence.to_bytes(8, "big") + plaintext.encode("utf-8")
+    ciphertext = aes.encrypt(nonce, payload, None)
     return nonce + ciphertext
 
 
 def aes_decrypt(key: bytes, data: bytes):
     aes = AESGCM(key)
-
     nonce = data[:12]
-
     ciphertext = data[12:]
-    payload = aes.decrypt(nonce,ciphertext,None)
-    sequence = int.from_bytes(payload[:8],"big")
-    plaintext = payload[:8].decode("utf-8")
+    payload = aes.decrypt(nonce, ciphertext, None)
+    sequence = int.from_bytes(payload[:8], "big")
+    plaintext = payload[8:].decode("utf-8")
     return sequence, plaintext
 
 def save_private_key(private_key, path: str):
