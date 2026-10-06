@@ -90,15 +90,16 @@ def aes_decrypt(key: bytes, data: bytes):
     return sequence, plaintext
 
 def save_private_key(private_key, path: str):
-    """Writes the RSA private key to disk in PEM format (unencrypted)."""
+    """Writes the RSA private key to disk in PEM format with owner-only permissions."""
     pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    with open(path, "wb") as f:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd,"wb") as f:
         f.write(pem)
-
+    os.chmod(path, 0o600)
 
 def load_private_key(path: str):
     """Loads an RSA private key from a PEM file. Returns (private_key, public_key)."""
