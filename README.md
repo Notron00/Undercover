@@ -4,11 +4,6 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
 
-![Version](https://img.shields.io/badge/version-1.0-blue)
-![Python](https://img.shields.io/badge/python-3.10+-yellow)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
-
 > 🇬🇧 English | [🇹🇷 Türkçe](README.tr.md)
 
 > Educational encrypted TCP chat application written in Python.

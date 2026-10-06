@@ -1,4 +1,8 @@
 # Undercover
+![Version](https://img.shields.io/badge/version-1.0-blue)
+![Python](https://img.shields.io/badge/python-3.10+-yellow)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
 
 > [🇬🇧 English](README.md) | 🇹🇷 Türkçe
 
@@ -7,6 +11,18 @@
 Undercover; ağ programlama, soket iletişimi, kriptografi ve güvenli iletişim protokollerini keşfetmek için geliştirilmiş bir istemci-sunucu TCP sohbet uygulamasıdır.
 
 Proje, istemci ile sunucu arasında bir AES oturum anahtarını güvenli şekilde değişmek için RSA kullanır. Anahtar değişiminden sonra sohbet iletişimi AES-256-GCM ile şifrelenir.
+
+## Contents
+
+- [Features](#features)
+- [Security Features](#security-features)
+- [Architecture](#architecture)
+- [Cryptographic Design](#cryptographic-design)
+- [Installation](#installation)
+- [Usage](#running-the-server)
+- [Commands](#commands)
+- [Security Considerations](#security-considerations)
+
 
 ## Özellikler
 
