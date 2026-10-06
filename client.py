@@ -4,10 +4,13 @@ import sys
 import os
 import json
 import getpass
+import base64
 
 from modules import makeup
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
+from modules.crypto import generate_dh_keypair, dh_public_bytes, dh_shared_key, safety_number
+from prompt_toolkit import print_formatted_text, ANSI
 
 from modules.crypto import (
     load_public_key,
@@ -22,6 +25,11 @@ from modules.protocol import (
     send_packet,
     recv_packet
 )
+
+my_dh_priv, my_dh_pub = generate_dh_keypair()
+e2e_sessions = {}
+e2e_pending = {}
+send_lock = threading.Lock()
 
 session = PromptSession()
 
@@ -125,13 +133,33 @@ send_packet(sock, encrypted_aes)
 send_seq = 0
 expected_seq = 0
 
+def e2e_start(peer, text):
+    """Bir peer'a E2E mesaj göndermeyi başlatır."""
+    if peer in e2e_sessions:
+        # Anahtar zaten var — direkt şifreli mesaj gönder
+        e2e_send_encrypted(peer, text)
+    else:
+        # Anahtar yok — handshake başlat, mesajı beklet
+        e2e_pending[peer] = text
+        pub_b64 = base64.b64encode(dh_public_bytes(my_dh_pub)).decode()
+        send_enc(f"/e2e_init {peer} {pub_b64}")
+
+def e2e_send_encrypted(peer, text):
+    """Kurulmuş ortak anahtarla mesajı şifreleyip gönderir."""
+    shared = e2e_sessions[peer]
+    # DİKKAT: aes_encrypt string alıyor ve nonce+ciphertext (bytes) döndürüyor.
+    # O bytes'ı base64 ile string yap, öyle gönder.
+    blob = aes_encrypt(shared, text, 0)          # sequence burada 0, E2E içinde ayrı sayaç yok
+    blob_b64 = base64.b64encode(blob).decode()
+    send_enc(f"/e2e_msg {peer} {blob_b64}")
+    print(makeup.TextColor["cyan"], f"[E2E to {peer}] {text}")
 
 def send_enc(text):
-    """Send one encrypted message during the handshake and bump the counter."""
+    """Send one encrypted message and bump the counter (thread-safe)."""
     global send_seq
-    send_packet(sock, aes_encrypt(aes_key, text, send_seq))
-    send_seq += 1
-
+    with send_lock:
+        send_packet(sock, aes_encrypt(aes_key, text, send_seq))
+        send_seq += 1
 
 def recv_enc():
     """Receive and decrypt one handshake message (sequence ignored here)."""
@@ -215,6 +243,41 @@ def receive():
             if seq < expected_seq:
                 continue
             expected_seq = seq + 1
+
+            # --- E2E mesajlarını yakala ---
+            if message.startswith("E2E_INIT "):
+                # format: E2E_INIT <sender> <pub_b64>
+                _, sender, pub_b64 = message.split(" ", 2)
+                peer_pub = base64.b64decode(pub_b64)
+                shared = dh_shared_key(my_dh_priv, peer_pub)
+                e2e_sessions[sender] = shared
+                # Cevap olarak kendi public'ini gönder
+                my_pub_b64 = base64.b64encode(dh_public_bytes(my_dh_pub)).decode()
+                send_enc(f"/e2e_reply {sender} {my_pub_b64}")
+                continue
+
+            if message.startswith("E2E_REPLY "):
+                # format: E2E_REPLY <sender> <pub_b64>
+                _, sender, pub_b64 = message.split(" ", 2)
+                peer_pub = base64.b64decode(pub_b64)
+                shared = dh_shared_key(my_dh_priv, peer_pub)
+                e2e_sessions[sender] = shared
+                # Bekleyen mesaj varsa şimdi gönder
+                if sender in e2e_pending:
+                    e2e_send_encrypted(sender, e2e_pending.pop(sender))
+                continue
+
+            if message.startswith("E2E_MSG "):
+                # format: E2E_MSG <sender> <blob_b64>
+                _, sender, blob_b64 = message.split(" ", 2)
+                if sender not in e2e_sessions:
+                    continue  # anahtar yoksa çözemeyiz, atla
+                blob = base64.b64decode(blob_b64)
+                _, text = aes_decrypt(e2e_sessions[sender], blob)
+                with patch_stdout():
+                    print_formatted_text(ANSI(f"\x1b[36m[E2E from {sender}] {text}\x1b[0m"))
+                continue
+
             with patch_stdout():
                 print(message)
         except Exception:
@@ -222,24 +285,43 @@ def receive():
             sock.close()
             break
 
-
 def send():
     global send_seq
     while True:
         try:
             message = session.prompt(f"{username}~$ ")
+            if message.startswith("/msg "):
+                rest = message[len("/msg "):]
+                parts = rest.split(" ", 1)
+                if len(parts) < 2:
+                    print(makeup.TextColor["red"], "[!] Usage: /msg <user> <message>")
+                    continue
+                peer, text = parts[0], parts[1]
+                e2e_start(peer, text)
+                continue
+            if message.startswith("/verify "):
+                peer = message[len("/verify "):].strip()
+                if peer in e2e_sessions:
+                    num = safety_number(e2e_sessions[peer])
+                    print(makeup.TextColor["cyan"], f"[VERIFY] Safety number with {peer}:")
+                    print(makeup.TextColor["cyan"], f"  {num}")
+                    print(makeup.TextColor["cyan"], "  Compare this with " + peer + " over a trusted channel .")
+                    print(makeup.TextColor["cyan"], "  If it matches on both sides, no one is intercepting. If not, STOP.")
+                else:
+                    print(makeup.TextColor["red"], f"[!] No E2E session with '{peer}' yet. Send them a /msg first.")
+                continue
             if "/quit" in message or "/exit" in message:
                 sock.close()
                 print(makeup.TextColor["cyan"], "[**] Disconnected from the chat")
                 break
-            encrypted = aes_encrypt(aes_key, message, send_seq)
-            send_seq += 1
-            send_packet(sock, encrypted)
+            with send_lock:
+                encrypted = aes_encrypt(aes_key, message, send_seq)
+                send_seq += 1
+                send_packet(sock, encrypted)
         except Exception:
             print(makeup.TextColor["red"], "[!] An error occurred while sending message.")
             sock.close()
             break
-
 
 threading.Thread(target=receive, daemon=True).start()
 

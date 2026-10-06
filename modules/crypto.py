@@ -5,7 +5,32 @@ import bcrypt
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+def generate_dh_keypair():
+    priv = X25519PrivateKey.generate()
+    return priv, priv.public_key()
+
+def dh_public_bytes(public_key):
+    return public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    )
+
+def dh_load_public(raw_bytes):
+    return X25519PublicKey.from_public_bytes(raw_bytes)
+
+def dh_shared_key(private_key, peer_public_bytes):
+    peer_pub = dh_load_public(peer_public_bytes)
+    shared = private_key.exchange(peer_pub)
+    # Ham DH çıktısını doğrudan anahtar olarak kullanma — HKDF ile türet
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b"undercover-e2e"
+    ).derive(shared)
 
 # ---------------- RSA ---------------- #
 
@@ -19,6 +44,18 @@ def generate_rsa_keys():
 
     return private_key, public_key
 
+def safety_number(shared_key: bytes) -> str:
+    """
+    Derives a human-comparable safety number from a shared E2E key.
+    Both parties compute the same number from the same shared key;
+    if a MITM substituted keys, the numbers differ.
+    """
+    import hashlib
+    digest = hashlib.sha256(shared_key).digest()
+    # İlk 10 baytı al, her baytı 3 haneli sayıya çevir, 5'erli grupla
+    nums = [f"{b:03d}" for b in digest[:10]]
+    # 10 sayıyı 2 gruba böl (okuması kolay olsun)
+    return " ".join(nums[:5]) + "  " + " ".join(nums[5:])
 
 def public_key_to_bytes(public_key):
     return public_key.public_bytes(

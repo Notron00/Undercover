@@ -163,7 +163,6 @@ def do_join(conn, username, args):
         send_to(conn, f"[SERVER] Room '{new_room}' created. You are the owner.")
     broadcast(f"[SERVER] {username} joined {new_room}.", new_room, conn)
     send_to(conn, f"[SERVER] You are now in '{new_room}'.")
-    print(f"[*] {username}: {old_room} -> {new_room}")
 
 
 def do_setpass(conn, username, args):
@@ -214,8 +213,33 @@ def do_msg(conn, username, args):
         return
     send_to(target_conn, f"[PM from {username}] {text}")
     send_to(conn, f"[PM to {real_name}] {text}")
-    print(f"[PM] {username} -> {real_name}: {text}")
 
+def relay_e2e(conn, sender, kind, raw):
+    """
+    Relays an E2E payload to a target user without inspecting it.
+    raw = "<target> <base64_payload>"
+    Forwarded to the target as: "<kind> <sender> <base64_payload>"
+    The server never sees the plaintext — it only reads the target name.
+    """
+    parts = raw.split(" ", 1)
+    if len(parts) < 2 or not parts[0].strip():
+        send_to(conn, "[SERVER] Malformed E2E message")
+        return
+    target_name = parts[0].strip()
+    payload = parts[1]
+
+    with lock:
+        target_conn = None
+        for c, data in clients.items():
+            if data["username"].casefold() == target_name.casefold():
+                target_conn = c
+                break
+
+    if target_conn is None:
+        send_to(conn, f"[SERVER] User '{target_name}' not found or offline.")
+        return
+
+    send_to(target_conn, f"{kind} {sender} {payload}")
 
 def authenticate(conn, aes_key, ip):
     """
@@ -290,12 +314,10 @@ def authenticate(conn, aes_key, ip):
 
 def handle_client(conn, addr):
     ip = addr[0]
-    print(f"[+] Connection: {addr}")
     username = "Unknown"
 
     # Reject connections from an IP that is currently rate-limited.
     if is_locked(ip_failures, ip):
-        print(f"[!] Rejected connection from rate-limited IP {ip}")
         try:
             conn.close()
         except Exception:
@@ -304,7 +326,6 @@ def handle_client(conn, addr):
 
     # Cap concurrent connections (anti flood DoS).
     if not connection_slots.acquire(blocking=False):
-        print(f"[!] Connection limit reached, rejecting {ip}")
         try:
             conn.close()
         except Exception:
@@ -338,7 +359,6 @@ def handle_client(conn, addr):
             if "lobby" not in rooms:
                 rooms["lobby"] = {"owner": None, "pass_hash": None}
 
-        print(f"[+] {username} authenticated and joined")
         broadcast(f"[SERVER] {username} joined lobby.", "lobby", conn)
 
         while True:
@@ -348,7 +368,6 @@ def handle_client(conn, addr):
             with lock:
                 expected = clients[conn]["expected_seq"]
                 if seq < expected:
-                    print(f"[!] Replay/old message from {username} (seq {seq} < {expected}), dropped")
                     continue
                 clients[conn]["expected_seq"] = seq + 1
 
@@ -364,10 +383,18 @@ def handle_client(conn, addr):
             if message.startswith("/msg "):
                 do_msg(conn, username, message[len("/msg "):])
                 continue
+            if message.startswith("/e2e_init "):
+                relay_e2e(conn, username, "E2E_INIT", message[len("/e2e_init "):])
+                continue
+            if message.startswith("/e2e_reply "):
+                relay_e2e(conn, username, "E2E_REPLY", message[len("/e2e_reply "):])
+                continue
+            if message.startswith("/e2e_msg "):
+                relay_e2e(conn, username, "E2E_MSG", message[len("/e2e_msg "):])
+                continue
 
             with lock:
                 room = clients[conn]["room"]
-            print(f"[{room}] {username}: {message}")
             broadcast(f"{username}: {message}", room, conn)
 
     except Exception as e:
@@ -388,7 +415,6 @@ def handle_client(conn, addr):
             pass
         if username != "Unknown":
             broadcast(f"[SERVER] {username} left chat.", left_room)
-        print(f"[-] {username} disconnected...")
         connection_slots.release()
 
 

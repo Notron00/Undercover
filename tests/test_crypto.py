@@ -100,3 +100,42 @@ def test_password_hash_is_salted():
     assert h1 != h2
     assert verify_password("same", h1)
     assert verify_password("same", h2)
+
+def test_dh_shared_key_matches():
+    from modules.crypto import generate_dh_keypair, dh_public_bytes, dh_shared_key
+    a_priv, a_pub = generate_dh_keypair()
+    b_priv, b_pub = generate_dh_keypair()
+    ali = dh_shared_key(a_priv, dh_public_bytes(b_pub))
+    veli = dh_shared_key(b_priv, dh_public_bytes(a_pub))
+    assert ali == veli
+    assert len(ali) == 32
+
+
+def test_dh_different_pairs_differ():
+    from modules.crypto import generate_dh_keypair, dh_public_bytes, dh_shared_key
+    a_priv, _ = generate_dh_keypair()
+    _, b_pub = generate_dh_keypair()
+    _, c_pub = generate_dh_keypair()
+    ab = dh_shared_key(a_priv, dh_public_bytes(b_pub))
+    ac = dh_shared_key(a_priv, dh_public_bytes(c_pub))
+    assert ab != ac
+
+def test_safety_number_matches_for_same_key():
+    from modules.crypto import generate_dh_keypair, dh_public_bytes, dh_shared_key, safety_number
+    a_priv, a_pub = generate_dh_keypair()
+    b_priv, b_pub = generate_dh_keypair()
+    ali = dh_shared_key(a_priv, dh_public_bytes(b_pub))
+    veli = dh_shared_key(b_priv, dh_public_bytes(a_pub))
+    # MITM yoksa aynı
+    assert safety_number(ali) == safety_number(veli)
+
+
+def test_safety_number_differs_for_different_keys():
+    from modules.crypto import generate_dh_keypair, dh_public_bytes, dh_shared_key, safety_number
+    # MITM senaryosu: Ali ve Veli farklı shared'lara sahip
+    a_priv, _ = generate_dh_keypair()
+    _, x_pub = generate_dh_keypair()
+    _, y_pub = generate_dh_keypair()
+    shared1 = dh_shared_key(a_priv, dh_public_bytes(x_pub))
+    shared2 = dh_shared_key(a_priv, dh_public_bytes(y_pub))
+    assert safety_number(shared1) != safety_number(shared2)
