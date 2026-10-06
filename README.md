@@ -1,4 +1,8 @@
 # Undercover
+![Version](https://img.shields.io/badge/version-1.0-blue)
+![Python](https://img.shields.io/badge/python-3.10+-yellow)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
 
 > 🇬🇧 English | [🇹🇷 Türkçe](README.tr.md)
 
@@ -7,6 +11,18 @@
 Undercover is a client-server TCP chat application developed to explore network programming, socket communication, cryptography, and secure communication protocols.
 
 The project uses RSA to securely exchange an AES session key between the client and server. After the key exchange, chat communication is encrypted using AES-256-GCM.
+
+## Contents
+
+- [Features](#features)
+- [Security Features](#security-features)
+- [Architecture](#architecture)
+- [Cryptographic Design](#cryptographic-design)
+- [Installation](#installation)
+- [Usage](#running-the-server)
+- [Commands](#commands)
+- [Security Considerations](#security-considerations)
+
 
 ## Features
 
@@ -205,9 +221,10 @@ The project was developed to practice:
 - [✓] Chat rooms
 - [✓] User authentication
 - [✓] Private messaging
-- [✓] Server_key.pm file is now owner only (0600 rule)
+- [✓] Server_key.pem file is now owner only (0600 rule)
 
 
 ## Future Improvements
 - [ ] E2EE (End-to-End Encryption) 
+- [ ] Windows compatibility
 
