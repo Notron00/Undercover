@@ -163,6 +163,7 @@ You can run server on vds/routed Port
 - `/setpass <password>` — owner sets a room password
 - `/delpass` — owner removes the room password
 - `/quit` or `/exit` — disconnect
+- `/msg <user> <message>` — send a private message
 
 ## Security Considerations
 
@@ -200,8 +201,10 @@ The project was developed to practice:
 - [✓] Replay protection [DoS Hardening]
 - [✓] bcrypt password hashing for protected rooms
 - [✓] Chat rooms
+- [✓] User authentication
+- [✓] Private messaging
+
 
 ## Future Improvements
+- [ ] E2EE (End-to-End Encryption) 
 
-- [ ] User authentication
-- [ ] Private messaging
