@@ -74,6 +74,37 @@ def send_to(conn, message):
     except Exception:
         pass
 
+def do_msg(conn, username, args):
+    """Handle /msg <user> <message> — private message to a single user."""
+    parts = args.split(" ", 1)
+    if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+        send_to(conn, "[SERVER] Usage: /msg <user> <message>")
+        return
+
+    target_name = parts[0].strip()
+    text = parts[1].strip()
+
+    # Find the target user's connection (case-insensitive).
+    with lock:
+        target_conn = None
+        for c, data in clients.items():
+            if data["username"].casefold() == target_name.casefold():
+                target_conn = c
+                real_name = data["username"]
+                break
+
+    if target_conn is None:
+        send_to(conn, f"[SERVER] User '{target_name}' not found or offline.")
+        return
+
+    if target_conn == conn:
+        send_to(conn, "[SERVER] You can't private-message yourself.")
+        return
+
+    # Deliver to target, and echo a confirmation to the sender.
+    send_to(target_conn, f"[PM from {username}] {text}")
+    send_to(conn, f"[PM to {real_name}] {text}")
+    print(f"[PM] {username} -> {real_name}: {text}")
 
 def broadcast(message, room, exclude=None):
     """Send message only to clients in the given room."""
@@ -240,6 +271,9 @@ def handle_client(conn, addr):
                 continue
             if message.strip() == "/delpass":
                 do_delpass(conn, username, "")
+                continue
+            if message.startswith("/msg "):
+                do_msg(conn, username, message[len("/msg "):])
                 continue
 
             # Normal message
