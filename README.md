@@ -1,6 +1,6 @@
 # Undercover
 
-> [🇬🇧 English](README.md) | 🇹🇷 Türkçe
+> 🇬🇧 English | [🇹🇷 Türkçe](README.tr.md)
 
 > Educational encrypted TCP chat application written in Python.
 
